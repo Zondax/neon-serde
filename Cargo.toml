@@ -8,11 +8,16 @@ repository = "https://github.com/GabrielCastro/neon-serde"
 readme = "readme.md"
 edition = "2021"
 
+[features]
+default = ["legacy-runtime"]
+legacy-runtime = ["neon/legacy-runtime"]
+napi-6 = ["neon/napi-6"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 snafu = "0.7.0"
 
-neon = "0.10.0"
+neon = { version = "0.10.0", default-features = false }
 
 [dependencies.num]
 version = "0.4"

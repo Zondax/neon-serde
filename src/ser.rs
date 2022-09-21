@@ -4,6 +4,8 @@
 
 use crate::errors::{self, Error, Result as LibResult};
 use neon::prelude::*;
+#[cfg(feature = "napi-6")]
+use neon::types::buffer::TypedArray;
 use num;
 use serde::ser::{self, Serialize};
 use snafu::OptionExt;
@@ -186,6 +188,7 @@ where
         Ok(js_str.upcast())
     }
 
+    #[cfg(feature = "legacy-runtime")]
     #[inline]
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
         let mut buff = JsBuffer::new(self.cx, as_num::<_, u32>(v.len())?)?;
@@ -194,6 +197,32 @@ where
         Ok(buff.upcast())
     }
 
+    #[cfg(feature = "napi-6")]
+    #[inline]
+    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
+        let mut buff = JsBuffer::new(self.cx, as_num::<_, usize>(v.len())?)?;
+        let guard = self.cx.lock();
+        let res_buff_copy = (&mut buff).try_borrow_mut(&guard);
+        match res_buff_copy {
+            Ok(mut r) => {
+                // r is a RefMut<'b, Self::Item> where Self::Item is a u8 for JsBuffer
+                r.clone_from_slice(v);
+                Ok(buff.upcast())
+            }
+            Err(_) => errors::NotImplemented {
+                name: "unimplemented Serializer::serialize_bytes",
+            }
+            .fail()?,
+        }
+    }
+
+    #[cfg(feature = "napi-6")]
+    #[inline]
+    fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
+        Ok(JsNull::new(self.cx).upcast())
+    }
+
+    #[cfg(feature = "legacy-runtime")]
     #[inline]
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
         Ok(JsNull::new().upcast())
@@ -207,11 +236,25 @@ where
         value.serialize(self)
     }
 
+    #[cfg(feature = "napi-6")]
+    #[inline]
+    fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
+        Ok(JsNull::new(self.cx).upcast())
+    }
+
+    #[cfg(feature = "legacy-runtime")]
     #[inline]
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
         Ok(JsNull::new().upcast())
     }
 
+    #[cfg(feature = "napi-6")]
+    #[inline]
+    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
+        Ok(JsNull::new(self.cx).upcast())
+    }
+
+    #[cfg(feature = "legacy-runtime")]
     #[inline]
     fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
         Ok(JsNull::new().upcast())
@@ -333,6 +376,7 @@ where
     type Ok = Handle<'j, JsValue>;
     type Error = Error;
 
+    #[cfg(feature = "napi-6")]
     fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
     where
         T: Serialize,
@@ -340,8 +384,19 @@ where
         let value = to_value(self.cx, value)?;
 
         let arr: Handle<'j, JsArray> = self.array;
-        let len = arr.len();
+        let len = arr.len(self.cx);
         arr.set(self.cx, len, value)?;
+        Ok(())
+    }
+
+    #[cfg(feature = "legacy-runtime")]
+    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    where
+        T: Serialize,
+    {
+        let value = to_value(self.cx, value)?;
+        let arr: Handle<'j, JsArray> = self.array;
+        arr.set(self.cx, arr.len(), value)?;
         Ok(())
     }
 

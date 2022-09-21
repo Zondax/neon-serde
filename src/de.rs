@@ -11,7 +11,13 @@ use serde::{
         VariantAccess, Visitor,
     },
 };
+
 use snafu::ensure;
+
+#[cfg(feature = "napi-6")]
+use neon::types::buffer::TypedArray;
+#[cfg(feature = "napi-6")]
+use std::ops::Deref;
 
 /// Deserialize an instance of type `T` from a `Handle<JsValue>`
 ///
@@ -31,6 +37,17 @@ where
 /// # Errors
 ///
 /// See [`from_value`] errors
+#[cfg(feature = "napi-6")]
+pub fn from_value_opt<'j, C, T>(cx: &mut C, value: Option<Handle<'j, JsValue>>) -> LibResult<T>
+where
+    C: Context<'j>,
+    T: DeserializeOwned + ?Sized,
+{
+    let unwrapped = value.unwrap_or_else(|| JsUndefined::new(cx).upcast());
+    from_value(cx, unwrapped)
+}
+
+#[cfg(feature = "legacy-runtime")]
 pub fn from_value_opt<'j, C, T>(cx: &mut C, value: Option<Handle<'j, JsValue>>) -> LibResult<T>
 where
     C: Context<'j>,
@@ -58,7 +75,43 @@ impl<'x, 'd, 'a, 'j, C: Context<'j>> serde::de::Deserializer<'x>
     for &'d mut Deserializer<'a, 'j, C>
 {
     type Error = LibError;
+    #[cfg(feature = "napi-6")]
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'x>,
+    {
+        if self.input.downcast::<JsNull, C>(self.cx).is_ok()
+            || self.input.downcast::<JsUndefined, C>(self.cx).is_ok()
+        {
+            visitor.visit_unit()
+        } else if let Ok(val) = self.input.downcast::<JsBoolean, C>(self.cx) {
+            visitor.visit_bool(val.value(self.cx))
+        } else if let Ok(val) = self.input.downcast::<JsString, C>(self.cx) {
+            visitor.visit_string(val.value(self.cx))
+        } else if let Ok(val) = self.input.downcast::<JsNumber, C>(self.cx) {
+            let v = val.value(self.cx);
+            if v.trunc() == v {
+                visitor.visit_i64(v as i64)
+            } else {
+                visitor.visit_f64(v)
+            }
+        } else if let Ok(_val) = self.input.downcast::<JsBuffer, C>(self.cx) {
+            self.deserialize_bytes(visitor)
+        } else if let Ok(val) = self.input.downcast::<JsArray, C>(self.cx) {
+            let mut deserializer = JsArrayAccess::new(self.cx, val);
+            visitor.visit_seq(&mut deserializer)
+        } else if let Ok(val) = self.input.downcast::<JsObject, C>(self.cx) {
+            let mut deserializer = JsObjectAccess::new(self.cx, val)?;
+            visitor.visit_map(&mut deserializer)
+        } else {
+            errors::NotImplemented {
+                name: "unimplemented Deserializer::Deserializer",
+            }
+            .fail()?
+        }
+    }
 
+    #[cfg(feature = "legacy-runtime")]
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'x>,
@@ -95,6 +148,87 @@ impl<'x, 'd, 'a, 'j, C: Context<'j>> serde::de::Deserializer<'x>
         }
     }
 
+    #[cfg(feature = "napi-6")]
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'x>,
+    {
+        let buff = self
+            .input
+            .downcast::<JsBuffer, C>(self.cx)
+            .or_throw(self.cx)?;
+        let guard = self.cx.lock();
+        let copy = buff.try_borrow(&guard);
+        match copy {
+            Ok(buff_copy) => {
+                let copy_vec = buff_copy.deref();
+                visitor.visit_bytes(copy_vec)
+            }
+            Err(_) => errors::NotImplemented {
+                name: "unimplemented Deserializer::deserialize_bytes",
+            }
+            .fail()?,
+        }
+    }
+
+    #[cfg(feature = "napi-6")]
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'x>,
+    {
+        let buff = self
+            .input
+            .downcast::<JsBuffer, C>(self.cx)
+            .or_throw(self.cx)?;
+        let guard = self.cx.lock();
+        let copy = buff.try_borrow(&guard);
+        match copy {
+            Ok(buff_copy) => {
+                let copy_vec = buff_copy.deref();
+                visitor.visit_byte_buf(Vec::from(copy_vec))
+            }
+            Err(_) => errors::NotImplemented {
+                name: "unimplemented Deserializer::deserialize_byte_buf",
+            }
+            .fail()?,
+        }
+    }
+
+    #[cfg(feature = "napi-6")]
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'x>,
+    {
+        if self.input.downcast::<JsNull, C>(self.cx).is_ok()
+            || self.input.downcast::<JsUndefined, C>(self.cx).is_ok()
+        {
+            visitor.visit_none()
+        } else {
+            visitor.visit_some(self)
+        }
+    }
+
+    #[cfg(feature = "legacy-runtime")]
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'x>,
+    {
+        let buff = self.input.downcast::<JsBuffer>().or_throw(self.cx)?;
+        let copy = self.cx.borrow(&buff, |buff| Vec::from(buff.as_slice()));
+        visitor.visit_bytes(&copy)
+    }
+
+    #[cfg(feature = "legacy-runtime")]
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'x>,
+    {
+        let buff = self.input.downcast::<JsBuffer>().or_throw(self.cx)?;
+        let copy = self.cx.borrow(&buff, |buff| Vec::from(buff.as_slice()));
+        visitor.visit_byte_buf(copy)
+    }
+
+    #[cfg(feature = "legacy-runtime")]
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'x>,
@@ -106,6 +240,41 @@ impl<'x, 'd, 'a, 'j, C: Context<'j>> serde::de::Deserializer<'x>
         }
     }
 
+    #[cfg(feature = "napi-6")]
+    fn deserialize_enum<V>(
+        self,
+        _name: &'static str,
+        _variants: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'x>,
+    {
+        if let Ok(val) = self.input.downcast::<JsString, C>(self.cx) {
+            let key = val.value(self.cx);
+            visitor.visit_enum(JsEnumAccess::new(self.cx, key, None))
+        } else if let Ok(val) = self.input.downcast::<JsObject, C>(self.cx) {
+            let prop_names = val.get_own_property_names(self.cx)?;
+            let len = prop_names.len(self.cx);
+            ensure!(
+                len == 1,
+                errors::InvalidKeyTypeSnafu {
+                    key: format!("object key with {len} properties")
+                }
+            );
+            let key: Handle<JsString> = prop_names.get(self.cx, 0)?;
+
+            // let key = prop_names.get(self.cx, 0)?.downcast::<JsString>().or_throw(self.cx)?;
+            let enum_value = val.get(self.cx, key)?;
+            let key_val = key.value(self.cx);
+            visitor.visit_enum(JsEnumAccess::new(self.cx, key_val, Some(enum_value)))
+        } else {
+            let m = self.input.to_string(self.cx)?.value(self.cx);
+            Err(errors::InvalidKeyTypeSnafu { key: m }.build())
+        }
+    }
+
+    #[cfg(feature = "legacy-runtime")]
     fn deserialize_enum<V>(
         self,
         _name: &'static str,
@@ -138,24 +307,6 @@ impl<'x, 'd, 'a, 'j, C: Context<'j>> serde::de::Deserializer<'x>
         }
     }
 
-    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'x>,
-    {
-        let buff = self.input.downcast::<JsBuffer>().or_throw(self.cx)?;
-        let copy = self.cx.borrow(&buff, |buff| Vec::from(buff.as_slice()));
-        visitor.visit_bytes(&copy)
-    }
-
-    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'x>,
-    {
-        let buff = self.input.downcast::<JsBuffer>().or_throw(self.cx)?;
-        let copy = self.cx.borrow(&buff, |buff| Vec::from(buff.as_slice()));
-        visitor.visit_byte_buf(copy)
-    }
-
     fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'x>,
@@ -181,6 +332,18 @@ struct JsArrayAccess<'a, 'j, C: Context<'j> + 'a> {
 
 #[doc(hidden)]
 impl<'a, 'j, C: Context<'j>> JsArrayAccess<'a, 'j, C> {
+    #[cfg(feature = "napi-6")]
+    fn new(cx: &'a mut C, input: Handle<'j, JsArray>) -> Self {
+        let len = input.len(cx);
+        JsArrayAccess {
+            cx,
+            input,
+            idx: 0,
+            len,
+        }
+    }
+
+    #[cfg(feature = "legacy-runtime")]
     fn new(cx: &'a mut C, input: Handle<'j, JsArray>) -> Self {
         JsArrayAccess {
             cx,
@@ -221,10 +384,24 @@ struct JsObjectAccess<'a, 'j, C: Context<'j> + 'a> {
 
 #[doc(hidden)]
 impl<'x, 'a, 'j, C: Context<'j>> JsObjectAccess<'a, 'j, C> {
+    #[cfg(feature = "legacy-runtime")]
     fn new(cx: &'a mut C, input: Handle<'j, JsObject>) -> LibResult<Self> {
         let prop_names = input.get_own_property_names(cx)?;
         let len = prop_names.len();
 
+        Ok(JsObjectAccess {
+            cx,
+            input,
+            prop_names,
+            idx: 0,
+            len,
+        })
+    }
+
+    #[cfg(feature = "napi-6")]
+    fn new(cx: &'a mut C, input: Handle<'j, JsObject>) -> LibResult<Self> {
+        let prop_names = input.get_own_property_names(cx)?;
+        let len = prop_names.len(cx);
         Ok(JsObjectAccess {
             cx,
             input,
@@ -353,7 +530,59 @@ impl<'x, 'a, 'j, C: Context<'j>> VariantAccess<'x> for JsVariantAccess<'a, 'j, C
             )),
         }
     }
+    #[cfg(feature = "napi-6")]
+    fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'x>,
+    {
+        match self.value {
+            Some(handle) => {
+                if let Ok(val) = handle.downcast::<JsArray, C>(self.cx) {
+                    let mut deserializer = JsArrayAccess::new(self.cx, val);
+                    visitor.visit_seq(&mut deserializer)
+                } else {
+                    Err(serde::de::Error::invalid_type(
+                        Unexpected::Other("JsValue"),
+                        &"tuple variant",
+                    ))
+                }
+            }
+            None => Err(serde::de::Error::invalid_type(
+                Unexpected::UnitVariant,
+                &"tuple variant",
+            )),
+        }
+    }
 
+    #[cfg(feature = "napi-6")]
+    fn struct_variant<V>(
+        self,
+        _fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'x>,
+    {
+        match self.value {
+            Some(handle) => {
+                if let Ok(val) = handle.downcast::<JsObject, C>(self.cx) {
+                    let mut deserializer = JsObjectAccess::new(self.cx, val)?;
+                    visitor.visit_map(&mut deserializer)
+                } else {
+                    Err(serde::de::Error::invalid_type(
+                        Unexpected::Other("JsValue"),
+                        &"struct variant",
+                    ))
+                }
+            }
+            _ => Err(serde::de::Error::invalid_type(
+                Unexpected::UnitVariant,
+                &"struct variant",
+            )),
+        }
+    }
+
+    #[cfg(feature = "legacy-runtime")]
     fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'x>,
@@ -377,6 +606,7 @@ impl<'x, 'a, 'j, C: Context<'j>> VariantAccess<'x> for JsVariantAccess<'a, 'j, C
         }
     }
 
+    #[cfg(feature = "legacy-runtime")]
     fn struct_variant<V>(
         self,
         _fields: &'static [&'static str],

@@ -44,7 +44,7 @@
 //!     b: Vec<f64>,
 //!     c: String,
 //! }
-//!
+//!#[cfg(feature = "legacy-runtime")]
 //! fn deserialize_something<'j>(mut cx: FunctionContext<'j>) -> Result<'j, JsValue> {
 //!     let arg0 = cx.argument::<JsValue>(0)?;
 //!
@@ -52,6 +52,16 @@
 //!     println!("{:?}", arg0_value);
 //!
 //!     Ok(JsUndefined::new().upcast())
+//! }
+//!
+//! #[cfg(feature = "napi-6")]
+//!  fn deserialize_something<'j>(mut cx: FunctionContext<'j>) -> Result<'j, JsValue> {
+//!     let arg0 = cx.argument::<JsValue>(0)?;
+//!
+//!     let arg0_value :AnObject = neon_serde::from_value(&mut cx, arg0)?;
+//!     println!("{:?}", arg0_value);
+//!
+//!     Ok(JsUndefined::new(&mut cx).upcast())
 //! }
 //!
 //! fn serialize_something<'j>(mut cx: FunctionContext<'j>) -> Result<'j, JsValue> {
@@ -89,9 +99,7 @@ impl<T> ResultExt<T> for errors::Result<T> {
         match self {
             Ok(ok) => Ok(ok),
             Err(e) => match e.backtrace() {
-                Some(backtrace) => {
-                    cx.throw_error(format!("{e}! Backtrace:\n{backtrace}"))
-                }
+                Some(backtrace) => cx.throw_error(format!("{e}! Backtrace:\n{backtrace}")),
                 None => cx.throw_error(e.to_string()),
             },
         }

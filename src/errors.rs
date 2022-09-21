@@ -104,6 +104,6 @@ impl de::Error for Error {
 
 impl From<Throw> for Error {
     fn from(err: Throw) -> Self {
-        JsSnafu{throw: err}.build()
+        JsSnafu { throw: err }.build()
     }
 }
