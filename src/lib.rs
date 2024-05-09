@@ -85,16 +85,21 @@ mod macros;
 
 pub use de::from_value;
 pub use de::from_value_opt;
+use neon::{context::Context, result::NeonResult};
 pub use ser::to_value;
 
-use neon::{context::Context, result::NeonResult};
-
 pub trait ResultExt<T>: Sized {
-    fn throw<'cx, C: Context<'cx>>(self, cx: &mut C) -> NeonResult<T>;
+    fn throw<'cx, C: Context<'cx>>(
+        self,
+        cx: &mut C,
+    ) -> NeonResult<T>;
 }
 
 impl<T> ResultExt<T> for errors::Result<T> {
-    fn throw<'cx, C: Context<'cx>>(self, cx: &mut C) -> NeonResult<T> {
+    fn throw<'cx, C: Context<'cx>>(
+        self,
+        cx: &mut C,
+    ) -> NeonResult<T> {
         use snafu::ErrorCompat;
         match self {
             Ok(ok) => Ok(ok),
@@ -108,9 +113,10 @@ impl<T> ResultExt<T> for errors::Result<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use errors::Result as LibResult;
     use neon::prelude::*;
+
+    use super::*;
 
     type Result<'a, T> = LibResult<Handle<'a, T>>;
 

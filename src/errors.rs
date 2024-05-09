@@ -1,10 +1,11 @@
 //! Defines error handling types used by the create
 //! uses the `snafu` crate for generation
 
+use std::{convert::From, fmt::Display};
+
 use neon::result::Throw;
 use serde::{de, ser};
 use snafu::{Backtrace, Snafu};
-use std::{convert::From, fmt::Display};
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(crate)))]
@@ -13,7 +14,10 @@ pub enum Error {
     ///
     /// Trying to serialize a string that is too long will result in an error
     #[snafu(display("String too long for NodeJS, len: {len}"))]
-    StringTooLong { len: usize, backtrace: Backtrace },
+    StringTooLong {
+        len: usize,
+        backtrace: Backtrace,
+    },
 
     /// Unable to coerce type
     ///
@@ -32,27 +36,35 @@ pub enum Error {
 
     /// Occurs when deserializing a char from an empty string
     #[snafu(display("Attempted to deserialize from an empty string"))]
-    EmptyString { backtrace: Backtrace },
+    EmptyString {
+        backtrace: Backtrace,
+    },
 
     /// Occurs when deserializing a char from a sting with
     /// more than one character
     #[snafu(display("String too long to be a char expected len: 1, got {len}"))]
-    StringTooLongForChar { len: usize, backtrace: Backtrace },
+    StringTooLongForChar {
+        len: usize,
+        backtrace: Backtrace,
+    },
 
     /// Occurs when deserializer expects a `null` or `undefined`
     /// but instead another type was found
     #[snafu(display("Found unexpected non-null type when deserializing"))]
-    ExpectingNull { backtrace: Backtrace },
+    ExpectingNull {
+        backtrace: Backtrace,
+    },
 
     /// Occurs when deserializing to an enum where the source object has
     /// a none-1 number of properties
     #[snafu(display("Error when deserializing enum, found key: '{key}'"))]
-    InvalidKeyType { key: String, backtrace: Backtrace },
+    InvalidKeyType {
+        key: String,
+        backtrace: Backtrace,
+    },
 
     /// An internal deserialization error from an invalid array
-    #[snafu(display(
-        "ArrayIndexOutOfBounds: attempted access to ({index}) when size: ({length})"
-    ))]
+    #[snafu(display("ArrayIndexOutOfBounds: attempted access to ({index}) when size: ({length})"))]
     ArrayIndexOutOfBounds {
         index: u32,
         length: u32,
@@ -61,16 +73,24 @@ pub enum Error {
 
     /// A JS exception was throws
     #[snafu(display("JS exception: {throw}"))]
-    Js { throw: Throw, backtrace: Backtrace },
+    Js {
+        throw: Throw,
+        backtrace: Backtrace,
+    },
 
     /// Failed to convert something to f64
     #[snafu(display("Unable to convert something to f64"))]
-    CastError { backtrace: Backtrace },
+    CastError {
+        backtrace: Backtrace,
+    },
 
     /// An error from serde
     #[snafu(display("Error occurred while (de)serializing: {msg}"))]
     #[snafu(context(suffix(false)))]
-    Serde { msg: String, backtrace: Backtrace },
+    Serde {
+        msg: String,
+        backtrace: Backtrace,
+    },
 
     /// This type of object is not supported
     #[doc(hidden)]
@@ -86,19 +106,13 @@ pub type Result<T> = ::core::result::Result<T, Error>;
 
 impl ser::Error for Error {
     fn custom<T: Display>(msg: T) -> Self {
-        Serde {
-            msg: msg.to_string(),
-        }
-        .build()
+        Serde { msg: msg.to_string() }.build()
     }
 }
 
 impl de::Error for Error {
     fn custom<T: Display>(msg: T) -> Self {
-        Serde {
-            msg: msg.to_string(),
-        }
-        .build()
+        Serde { msg: msg.to_string() }.build()
     }
 }
 
