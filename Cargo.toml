@@ -1,11 +1,11 @@
 [package]
 name = "neon-serde"
 version = "0.10.0"
-authors = ["Gabriel Castro <dev@GabrielCastro.ca>"]
+authors = ["Gabriel Castro <dev@GabrielCastro.ca>", "Zondax AG <hello@zondax.ch>"]
 description = "Easily serialize object for use with neon"
 license = "MIT"
 repository = "https://github.com/GabrielCastro/neon-serde"
-readme = "readme.md"
+readme = "README.md"
 edition = "2021"
 
 [features]
@@ -15,7 +15,7 @@ napi-6 = ["neon/napi-6"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-snafu = "0.7.0"
+snafu = "0.8.2"
 
 neon = { version = "0.10.0", default-features = false }
 

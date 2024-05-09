@@ -1,8 +1,4 @@
-Neon-serde
-==========
-
-[![Build Status](https://travis-ci.org/GabrielCastro/neon-serde.svg?branch=master)](https://travis-ci.org/GabrielCastro/neon-serde)
-[![](https://meritbadge.herokuapp.com/neon-serde)](https://crates.io/crates/neon-serde)
+# Neon-serde 2
 
 This crate is a utility to easily convert values between
 
@@ -25,7 +21,7 @@ Convert a value implementing `serde::Serialize` to
 a `Handle<JsValue>`
 
 ## Export Macro example
-The export! macro allows you to quickly define functions automatically convert thier arguments
+The export! macro allows you to quickly define functions automatically convert their arguments
 
 ```rust,no_run
 
